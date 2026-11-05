@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>茶屿 TEA ISLAND · 门店运营系统</title>
+<link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-mark">茶</div>
+    <div class="brand-text">
+      <b>茶屿 <span class="en">TEA ISLAND</span></b>
+      <small><span data-i18n="brand.store">门店</span> S1 · <span class="live-dot"></span><span data-i18n="brand.open">营业中</span></small>
+    </div>
+  </div>
+
+  <nav class="nav" id="nav">
+    <button class="nav-btn active" data-nav="pos"><span data-i18n="nav.pos">收银</span></button>
+    <button class="nav-btn" data-nav="kds"><span data-i18n="nav.kds">制作</span><i class="badge-dot" id="kds-badge" hidden>0</i></button>
+    <button class="nav-btn" data-nav="admin"><span data-i18n="nav.admin">后台</span></button>
+  </nav>
+
+  <div class="top-actions">
+    <button class="lang-btn" id="lang-btn" title="Language">EN</button>
+    <button class="ghost-btn" data-act="help"><span data-i18n="nav.help">流程指引</span></button>
+    <div class="clock"><b id="clock">--:--</b><small id="today">--</small></div>
+  </div>
+</header>
+
+<main id="main">
+  <section id="view-pos" class="view"></section>
+  <section id="view-kds" class="view hidden"></section>
+  <section id="view-admin" class="view hidden"></section>
+</main>
+
+<div id="modal-root"></div>
+<div id="toast-root"></div>
+<div id="callout" class="callout hidden"></div>
+<div id="print-area"></div>
+
+<script src="assets/data.js"></script>
+<script src="assets/i18n.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/ui.js"></script>
+<script src="assets/view-pos.js"></script>
+<script src="assets/view-kds.js"></script>
+<script src="assets/view-admin.js"></script>
+<script src="assets/boot.js"></script>
+</body>
+</html>

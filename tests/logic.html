@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>逻辑自测</title>
+<style>body{font-family:monospace;background:#111;color:#ddd;padding:20px;line-height:1.7} .p{color:#5f5} .f{color:#f66} h3{color:#fb3}</style>
+</head>
+<body>
+<pre id="out">running…</pre>
+<script src="../assets/data.js"></script>
+<script src="../assets/i18n.js"></script>
+<script src="../assets/store.js"></script>
+<script>
+(function(){
+  const S = window.Store, out = [];
+  let pass = 0, fail = 0;
+  function ok(name, cond, detail){
+    if (cond) { pass++; out.push('  PASS  ' + name); }
+    else { fail++; out.push('  FAIL  ' + name + (detail ? '  → ' + detail : '')); }
+  }
+  function section(t){ out.push('\n[' + t + ']'); }
+  const fresh = () => { S.reset(); S.clearCart(); };
+
+  // ---------- 1. 含税拆分 ----------
+  section('含税拆分 (标价含税)');
+  fresh();
+  S.addToCart('p_signature', {size:'sz_m',sugar:'sug_50',ice:'ice_n',toppings:[]}, 1, '');
+  let t1 = S.totals();
+  ok('小计 990', t1.subtotalSen === 990, t1.subtotalSen);
+  ok('合计 990', t1.totalSen === 990, t1.totalSen);
+  ok('税前 934', t1.baseSen === 934, t1.baseSen);
+  ok('税额 56', t1.taxSen === 56, t1.taxSen);
+  ok('税+税前 == 合计', t1.baseSen + t1.taxSen === t1.totalSen);
+  ok('税率约 6%', Math.abs(t1.taxSen / t1.baseSen - 0.06) < 0.0005, (t1.taxSen/t1.baseSen).toFixed(5));
+
+  // ---------- 2. 折扣在含税价上 ----------
+  section('折扣与券');
+  S.db.checkout.discount = {type:'percent', value:10, reason:'test'};
+  let t2 = S.totals();
+  ok('9 折后 891', t2.totalSen === 891, t2.totalSen);
+  ok('折后税前 841', t2.baseSen === 841, t2.baseSen);
+  ok('折后税 50', t2.taxSen === 50, t2.taxSen);
+  ok('折后仍满足 税前+税=合计', t2.baseSen + t2.taxSen === t2.totalSen);
+
+  S.db.checkout.discount = null;
+  S.db.checkout.couponId = 'cp_pub3';
+  let t3 = S.totals();
+  ok('RM3 券 → 690', t3.totalSen === 690, t3.totalSen);
+
+  S.db.checkout.couponId = 'cp_new5';   // 会员券，未选会员不可用
+  let t4 = S.totals();
+  ok('会员券在未识别会员时不生效', t4.couponSen === 0, t4.couponSen);
+
+  S.db.checkout.couponId = null;
+  S.db.checkout.discount = {type:'free', value:100, reason:'客诉'};
+  let t5 = S.totals();
+  ok('免单 → 0', t5.totalSen === 0 && t5.taxSen === 0, t5.totalSen);
+
+  // ---------- 3. BOM ----------
+  section('配方 BOM 与杯型系数');
+  S.db.checkout.discount = null;
+  const l0 = S.calcLine('p_signature', {size:'sz_l',sugar:'sug_50',ice:'ice_n',toppings:[]});
+  ok('大杯红茶 8×1.3=10.4', Math.abs(l0.usage.tea_black - 10.4) < 1e-6, l0.usage.tea_black);
+  ok('珍珠不随杯型放大 60', Math.abs(l0.usage.boba - 60) < 1e-6, l0.usage.boba);
+  const l = S.calcLine('p_signature', {size:'sz_l',sugar:'sug_50',ice:'ice_n',toppings:['tp_boba']});
+  ok('加料珍珠再 +60 → 120', l.usage.boba === 120, l.usage.boba);
+  ok('大杯用 cup_l', l.usage.cup_l === 1 && !l.usage.cup_m);
+  ok('每个杯子都有杯贴', l.usage.label === 1);
+  ok('单价 990+200+150=1340', l.unitPriceSen === 1340, l.unitPriceSen);
+  ok('COGS 大于 0 且 < 售价', l.cogsSen > 0 && l.cogsSen < l.unitPriceSen, l.cogsSen + 'sen');
+
+  // ---------- 4. 支付 + 扣料 + 积分 ----------
+  section('收款后扣料与积分');
+  fresh();
+  S.addToCart('p_signature', {size:'sz_m',sugar:'sug_50',ice:'ice_n',toppings:[]}, 2, '');
+  S.db.checkout.memberId = 'M001';           // 金卡 1.5x
+  const teaBefore = S.ingredient('tea_black').stock;
+  const cupBefore = S.ingredient('cup_m').stock;
+  const payRes = S.pay('cash', 5000);
+  ok('支付成功', payRes.ok);
+  const o = payRes.order;
+  ok('单号 A 开头', /^A\d{3}$/.test(o.no), o.no);
+  ok('找零 5000-1980=3020', o.payments[0].changeSen === 3020, o.payments[0].changeSen);
+  ok('红茶扣 16g', Math.abs(S.ingredient('tea_black').stock - (teaBefore - 16)) < 1e-6, teaBefore + '→' + S.ingredient('tea_black').stock);
+  ok('杯扣 2 个', Math.abs(S.ingredient('cup_m').stock - (cupBefore - 2)) < 1e-6);
+  ok('杯贴耗 2 张', Math.abs(S.db.moves.filter(m => m.ingId === 'label' && m.ref === o.id).reduce((a, m) => a + m.qty, 0)) === 2);
+  ok('订单按杯拆行（2 杯 2 行）', o.items.length === 2, o.items.length);
+  ok('积分 9.9×2×1.5 → 29', o.pointsEarned === 29, o.pointsEarned);
+  ok('订单进入待制作', o.status === 'paid');
+  ok('购物车已清空', S.db.cart.length === 0);
+  ok('空车不能付款', S.pay('cash', 1000).ok === false);
+
+  // ---------- 5. 制作状态机 ----------
+  section('整单工单状态机');
+  S.claim(o.id);
+  ok('领取后为制作中', S.orderById(o.id).status === 'preparing');
+  const f1 = S.finish(o.id);
+  ok('未做完不能完成', f1.ok === false && f1.count === 2, JSON.stringify(f1));
+  S.toggleCup(o.id, 1);
+  ok('完成 1 杯', S.orderById(o.id).items[0].status === 'done');
+  const f2 = S.finish(o.id);
+  ok('还差 1 杯仍不能完成', f2.ok === false && f2.count === 1);
+  S.toggleCup(o.id, 2);
+  const f3 = S.finish(o.id);
+  ok('全部完成 → 待取餐', f3.ok && S.orderById(o.id).status === 'ready');
+  ok('完成即叫号', !!S.orderById(o.id).calledAt);
+  S.pickup(o.id);
+  ok('已取餐 → 完成', S.orderById(o.id).status === 'completed');
+
+  // ---------- 6. 退单回滚 ----------
+  section('退单回滚');
+  fresh();
+  S.addToCart('p_signature', {size:'sz_m',sugar:'sug_50',ice:'ice_n',toppings:[]}, 1, '');
+  const teaB2 = S.ingredient('tea_black').stock;
+  const r2 = S.pay('duitnow', 0);
+  const teaA2 = S.ingredient('tea_black').stock;
+  ok('DuitNow 支付成功', r2.ok);
+  const revBefore = S.todayStats().revenueSen;
+  S.voidOrder(r2.order.id, 'test');
+  ok('退单后状态 void', S.orderById(r2.order.id).status === 'void');
+  ok('库存已回滚', Math.abs(S.ingredient('tea_black').stock - teaB2) < 1e-6, teaB2 + '→' + S.ingredient('tea_black').stock);
+  ok('退单后营业额回落到退单前', S.todayStats().revenueSen === revBefore - r2.order.totalSen, S.todayStats().revenueSen + ' vs ' + (revBefore - r2.order.totalSen));
+
+  // ---------- 7. 储值 ----------
+  section('储值与余额支付');
+  fresh();
+  const m = S.member('M001');
+  const bal0 = m.balanceSen;
+  S.topup('M001', 10000, 1000);
+  ok('充值 100 送 10', S.member('M001').balanceSen === bal0 + 11000, S.member('M001').balanceSen);
+  S.addToCart('p_jasmine', {size:'sz_m',sugar:'sug_0',ice:'ice_0',toppings:[]}, 1, '');
+  S.db.checkout.memberId = 'M001';
+  const r3 = S.pay('balance', 0);
+  ok('余额支付成功', r3.ok);
+  ok('余额扣减 690', S.member('M001').balanceSen === bal0 + 11000 - 690, S.member('M001').balanceSen);
+
+  // ---------- 8. 手机号归一化 ----------
+  section('手机号归一化');
+  ok('012-345 6789 → +60123456789', S.normalizePhone('012-345 6789') === '+60123456789', S.normalizePhone('012-345 6789'));
+  ok('+60 12 345 6789 一致', S.normalizePhone('+60 12 345 6789') === '+60123456789');
+  ok('后四位可检索', S.searchMembers('6789').some(x => x.id === 'M001'));
+  ok('掩码显示', S.maskPhone('+60123456789') === '012-*** 6789', S.maskPhone('+60123456789'));
+
+  // ---------- 9. 报表 ----------
+  section('报表口径');
+  fresh();
+  const st0 = S.todayStats();
+  ok('营业额 = 税前 + 税', st0.revenueSen === st0.netSen + st0.taxSen, st0.revenueSen + ' vs ' + (st0.netSen + st0.taxSen));
+  ok('毛利 = 税前 - COGS', st0.grossSen === st0.netSen - st0.cogsSen);
+  ok('7 日序列长度 7', S.series(7).length === 7);
+
+  out.unshift((fail === 0 ? '✅ ALL PASS' : '❌ ' + fail + ' FAILED') + '  (' + pass + ' passed, ' + fail + ' failed)');
+  const el = document.getElementById('out');
+  el.textContent = out.join('\n').replace(/  PASS  /g, '  <P>').replace(/  FAIL  /g, '  <F>');
+  el.innerHTML = out.join('\n')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/  PASS  /g, '  <span class="p">PASS</span>  ')
+    .replace(/  FAIL  /g, '  <span class="f">FAIL</span>  ')
+    .replace(/\[(.+?)\]/g, '<h3>[$1]</h3>');
+  document.title = fail === 0 ? 'PASS' : 'FAIL';
+  document.body.setAttribute('data-result', fail === 0 ? 'pass' : 'fail');
+})();
+</script>
+</body>
+</html>

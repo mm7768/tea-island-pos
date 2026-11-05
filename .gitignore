@@ -1,0 +1,14 @@
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# 临时产物
+.shots/
+*.log
+*.tmp
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
